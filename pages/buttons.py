@@ -1,16 +1,20 @@
-from django.template import loader, RequestContext, Context, Template
+from django.template import loader
+from django.template.context import RequestContext
 from django.http import HttpResponse, HttpResponseRedirect
-from django.utils.translation import ugettext as _
-from django.utils.functional import update_wrapper
-from django.utils.encoding import force_unicode
+from django.utils.translation import gettext as _
+from django.utils.encoding import force_str  # Changed from force_unicode
 from django.shortcuts import get_object_or_404
 from django.utils.safestring import mark_safe
-from django.contrib.admin.util import unquote
+from django.contrib.admin.utils import unquote  # Moved from admin.util
 from django.contrib.admin import helpers
 from django.utils.text import capfirst
 from django.utils.html import escape
 from django.contrib import admin
 from django.http import QueryDict
+from django.urls import path, re_path
+from django.core.exceptions import PermissionDenied
+from django.http import Http404
+from functools import update_wrapper
 
 class Button(object):
     def __init__(self, url, desc, kls=None, saveOnClick=True, forAll=False, display=True, needSuperUser=True):
@@ -24,20 +28,19 @@ class Button(object):
         self.forAll = forAll
         self.needSuperUser = needSuperUser
             
-    def __unicode__(self):
-            
+    def __str__(self):  # Changed from __unicode__ for Python 3
         if not self.saveOnClick or self.forAll:
             if self.saveOnClick or not self.url.startswith('/'):
                 url = "tool_%s" % self.url
             else:
                 url = self.url
         
-            link = u'<a href="%s"' % url
+            link = '<a href="%s"' % url  # Removed u prefix
             if self.kls:
-                link += u' class="%s"' % self.kls
-            link += u'>%s</a>' % self.desc
+                link += ' class="%s"' % self.kls
+            link += '>%s</a>' % self.desc
         else:
-            link = u'<input type="submit" name="tool_%s" value="%s"/>' % (self.url, self.desc)
+            link = '<input type="submit" name="tool_%s" value="%s"/>' % (self.url, self.desc)
         return mark_safe(link)
 
     def determineIfShow(self, user):
@@ -50,31 +53,27 @@ class ButtonAdminMixin(object):
     def tool_urls(self):
         """Mostly copied from django.contrib.admin.ModelAdmin.get_urls"""
         
-        from django.conf.urls.defaults import patterns, url
-
         def wrap(view):
             def wrapper(*args, **kwargs):
                 return self.admin_site.admin_view(view)(*args, **kwargs)
             return update_wrapper(wrapper, view)
 
-        info = self.model._meta.app_label, self.model._meta.module_name
+        info = self.model._meta.app_label, self.model._meta.model_name  # Changed from module_name
         
         urls = []
         for button in self.buttons:
+            # New style with path()/re_path()
             urls.append(
-                url(r'^(.+)/tool_%s/$' % button.url,
+                re_path(r'^(.+)/tool_%s/$' % button.url,
                     wrap(self.button_url),
-                    kwargs = dict(button=button),
-                    name = '%s_%s_tool_%%s' % info % button.url,
+                    kwargs={'button': button},
+                    name='%s_%s_tool_%s' % (info[0], info[1], button.url),
                 )
             )
             
-        urlpatterns = patterns('', *urls)
-        return urlpatterns
+        return urls  # Changed from patterns('', *urls)
 
-    
     def button_url(self, request, object_id, button):
-    
         model = self.model
         obj = get_object_or_404(model, pk=object_id)
         result = getattr(self, "tool_%s" % button.url)(request, obj, button)
@@ -87,12 +86,12 @@ class ButtonAdminMixin(object):
         opts = model._meta
         app_label = opts.app_label
         context = {
-            'title': _('%s: %s') % (button.desc, force_unicode(obj)),
-            'module_name': capfirst(force_unicode(opts.verbose_name_plural)),
+            'title': _('%s: %s') % (button.desc, force_str(obj)),  # Changed from force_unicode
+            'module_name': capfirst(force_str(opts.verbose_name_plural)),
             'object': obj,
             'root_path': self.admin_site.root_path,
             'app_label': app_label,
-            'bread_title' : button.desc,
+            'bread_title': button.desc,
         }
         context.update(extra or {})
         
@@ -101,24 +100,21 @@ class ButtonAdminMixin(object):
         return HttpResponse(t.render(c))
 
 class ButtonAdmin(admin.ModelAdmin, ButtonAdminMixin):
-    """Unfortunately I can't add these to the mixin, but I still want to have the mixin stuff as a mixin"""
     def changelist_view(self, request, extra_context=None):
-        if not extra_context:
-            extra_context = {}
+        extra_context = extra_context or {}
         
         [b.determineIfShow(request.user) for b in self.buttons]
-        extra_context['buttons']=self.buttons
+        extra_context['buttons'] = self.buttons
         
-        return super(ButtonAdmin, self).changelist_view(request, extra_context)
+        return super().changelist_view(request, extra_context)
         
     def change_view(self, request, object_id, extra_context=None):
-        if not extra_context:
-            extra_context = {}
+        extra_context = extra_context or {}
         
         [b.determineIfShow(request.user) for b in self.buttons]
-        extra_context['buttons']=self.buttons
+        extra_context['buttons'] = self.buttons
         
-        result = super(ButtonAdmin, self).change_view(request, object_id, extra_context)
+        result = super().change_view(request, object_id, extra_context)
         
         redirect = None
         for key in request.POST.keys():
@@ -128,25 +124,24 @@ class ButtonAdmin(admin.ModelAdmin, ButtonAdminMixin):
         if not redirect:
             return result
         else:
-            #a lot of this is copied from django.contrib.admin.ModelAdmin.change_view
             model = self.model
             opts = model._meta
 
             try:
-                obj = self.queryset(request).get(pk=unquote(object_id))
+                obj = self.get_queryset(request).get(pk=unquote(object_id))  # Changed from queryset
             except model.DoesNotExist:
-                # Don't raise Http404 just yet, because we haven't checked
-                # permissions yet. We don't want an unauthenticated user to be able
-                # to determine whether a given object exists.
                 obj = None
 
             if not self.has_change_permission(request, obj):
                 raise PermissionDenied
 
             if obj is None:
-                raise Http404(_('%(name)s object with primary key %(key)r does not exist.') % {'name': force_unicode(opts.verbose_name), 'key': escape(object_id)})
+                raise Http404(_('%(name)s object with primary key %(key)r does not exist.') % {
+                    'name': force_str(opts.verbose_name),
+                    'key': escape(object_id)
+                })
 
-            if request.method == 'POST' and request.POST.has_key("_saveasnew"):
+            if request.method == 'POST' and "_saveasnew" in request.POST:
                 return self.add_view(request, form_url='../add/')
 
             ModelForm = self.get_form(request, obj)
@@ -154,8 +149,8 @@ class ButtonAdmin(admin.ModelAdmin, ButtonAdminMixin):
             if request.method == 'POST':
                 form = ModelForm(request.POST, request.FILES, instance=obj)
                 if form.is_valid():
-					form_validated = True
-					new_object = self.save_form(request, form, change=True)
+                    form_validated = True
+                    new_object = self.save_form(request, form, change=True)
                 else:
                     form_validated = False
                     new_object = obj
@@ -171,7 +166,6 @@ class ButtonAdmin(admin.ModelAdmin, ButtonAdminMixin):
                                       instance=None, prefix=prefix)
                         formsets.append(formset)
                     except:
-                        #Deleted items can cause this to fail.
                         pass
                     
                 errors = helpers.AdminErrorList(form, formsets)
@@ -180,9 +174,9 @@ class ButtonAdmin(admin.ModelAdmin, ButtonAdminMixin):
                             
         return result
         
+    @property
     def urls(self):
         if hasattr(self, 'buttons'):
-            return self.tool_urls() + self.get_urls()
+            return self.tool_urls() + super().get_urls()
         else:
-            return self.get_urls()
-    urls = property(urls)
+            return super().get_urls()

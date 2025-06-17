@@ -1,17 +1,12 @@
-from django.conf.urls.defaults import *
-
 from django.contrib import admin
-admin.autodiscover()
+from django.urls import path, include
+from django.conf import settings
 
-urlpatterns = patterns('',
-    (r'^admin/', include(admin.site.urls)),
-	(r'^', include('pages.urls')),
-	(r'^categories/$', 'pages.views.show_categories'),
-	(r'^media/(?P<path>.*)$', 'django.views.static.serve',
-		{ 'document_root' : '/Users/bnabilos/CCMS/cms/media' }),
-	(r'^styles/(?P<path>.*)$', 'django.views.static.serve',
-		{ 'document_root' : '/Users/bnabilos/CCMS/cms/templates/styles' }),
-	(r'^images/(?P<path>.*)$', 'django.views.static.serve',
-		{ 'document_root' : '/Users/bnabilos/CCMS/cms/images' }),
-	
-)
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('', include('pages.urls')),  # Move all pages URLs to pages/urls.py
+]
+
+if settings.DEBUG:
+    from django.conf.urls.static import static
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

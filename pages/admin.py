@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*- 
 
-from django.contrib import admin
+# pages/admin.py
+
 from django.db import models
 from django import forms
 from django.http import HttpResponseRedirect
@@ -16,7 +17,11 @@ from pages.forms import ArticleForm
 
 from pages.buttons import Button, ButtonAdmin
 
-class CategorieAdmin(ButtonAdmin):
+from django.contrib import admin
+from .models import Categorie
+from champs.models import Titre
+
+class CategorieAdmin(admin.ModelAdmin):
 	prepopulated_fields = { "alias": ("titre",) }
 	form = CategorieForm
 	
@@ -49,6 +54,11 @@ class CategorieAdmin(ButtonAdmin):
 		self.form.case = 3
 		return HttpResponseRedirect('/admin/pages/categorie')
 	"""  
+	def get_form(self, request, obj=None, **kwargs):
+		form = super().get_form(request, obj, **kwargs)
+		# Ensure only existing Titres can be selected
+		form.base_fields['titre'].queryset = Titre.objects.all()
+		return form
 	
 	
 class ArticleAdmin(admin.ModelAdmin):
